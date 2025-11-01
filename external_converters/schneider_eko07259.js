@@ -31,8 +31,6 @@ export default {
         },
     ],
     toZigbee: [
-        tz.thermostat_occupied_heating_setpoint,
-        tz.thermostat_system_mode,
         {
             key: ['inactive_brightness'],
             convertSet: async (entity, key, value, meta) => {
@@ -65,8 +63,28 @@ export default {
                 await endpoint.read('hvacUserInterfaceCfg', [0xe001], {manufacturerCode: 0x105e});
             },
         },
+        tz.thermostat_occupied_heating_setpoint,
+            tz.thermostat_system_mode,
+            tz.thermostat_running_state,
+            tz.thermostat_local_temperature,
+            tz.thermostat_control_sequence_of_operation,
+            tz.schneider_pilot_mode,
+            tz.schneider_thermostat_keypad_lockout,
+            tz.thermostat_temperature_display_mode,
     ],
     exposes: [
+        e.binary("keypad_lockout", ea.STATE_SET, "lock1", "unlock").withDescription("Enables/disables physical input on the device"),
+            e.enum("schneider_pilot_mode", ea.ALL, ["contactor", "pilot"]).withDescription("Controls piloting mode"),
+            e
+                .enum("temperature_display_mode", ea.ALL, ["celsius", "fahrenheit"])
+                .withDescription("The temperature format displayed on the thermostat screen"),
+            e
+                .climate()
+                .withSetpoint("occupied_heating_setpoint", 0, 40, 0.5)
+                .withLocalTemperature()
+                .withSystemMode(["off", "heat"])
+                .withRunningState(["idle", "heat"])
+                .withPiHeatingDemand(),
         e.numeric('inactive_brightness', ea.ALL)
             .withUnit('%')
             .withValueMin(0)
