@@ -1,4 +1,3 @@
-import * as m from 'zigbee-herdsman-converters/lib/modernExtend';
 import * as exposes from 'zigbee-herdsman-converters/lib/exposes';
 import fz from 'zigbee-herdsman-converters/converters/fromZigbee';
 import tz from 'zigbee-herdsman-converters/converters/toZigbee';
@@ -11,10 +10,29 @@ export default {
     model: 'EKO07259',
     vendor: 'Schneider Electric',
     description: 'Smart thermostat',
-    extend: [
-        m.temperature({ "endpointNames": ["2", "3"] }),
-    ],
+    extend: [],
     fromZigbee: [fz.stelpro_thermostat, fz.metering, fz.schneider_pilot_mode, fz.wiser_device_info, fz.hvac_user_interface, {
+        cluster: 0x0402, // Temperature Measurement cluster
+        type: ['attributeReport', 'readResponse'],
+        convert: (model, msg, publish, options, meta) => {
+            const endpointId = msg.endpoint?.ID;
+            const result = {};
+            
+            // Handle temperature from endpoint 2 (ambient) and endpoint 3 (external)
+            if (endpointId === 2 || endpointId === 3) {
+                const measuredValueAttrId = 0x0000; // MeasuredValue attribute
+                const measuredValue = msg.data?.[measuredValueAttrId] ?? msg.data?.[String(measuredValueAttrId)] ?? msg.data?.['0x0000'];
+                
+                if (measuredValue !== undefined && measuredValue !== null && measuredValue !== 0x8000) {
+                    const temperature = measuredValue / 100; // Convert from 0.01°C to °C
+                    const key = endpointId === 2 ? 'temperature_2' : 'temperature_3';
+                    result[key] = temperature;
+                }
+            }
+            
+            return Object.keys(result).length > 0 ? result : undefined;
+        },
+    }, {
         cluster: 'hvacUserInterfaceCfg',
         type: ['attributeReport', 'readResponse'],
         convert: (model, msg, publish, options, meta) => {
@@ -157,6 +175,12 @@ export default {
             .withValueMin(0)
             .withValueMax(100)
             .withDescription('Brightness level when inactive (0-100). Must be less than or equal to brightness.'),
+        e.numeric('temperature_2', ea.STATE)
+            .withUnit('°C')
+            .withDescription('Ambient temperature from endpoint 2'),
+        e.numeric('temperature_3', ea.STATE)
+            .withUnit('°C')
+            .withDescription('External temperature from endpoint 3'),
     ],
     meta: {
         multiEndpoint: true,
