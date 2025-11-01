@@ -39,6 +39,7 @@ export default {
             const result = {};
             const inactiveBrightnessAttrId = 0xe001;
             const brightnessAttrId = 0xe000;
+            const activityTimeoutAttrId = 0xe002;
             
             if (msg.data && (msg.data.hasOwnProperty(inactiveBrightnessAttrId) || msg.data.hasOwnProperty(String(inactiveBrightnessAttrId)))) {
                 const value = msg.data[inactiveBrightnessAttrId] ?? msg.data[String(inactiveBrightnessAttrId)];
@@ -48,6 +49,16 @@ export default {
             if (msg.data && (msg.data.hasOwnProperty(brightnessAttrId) || msg.data.hasOwnProperty(String(brightnessAttrId)))) {
                 const value = msg.data[brightnessAttrId] ?? msg.data[String(brightnessAttrId)];
                 result.brightness = value;
+            }
+            
+            if (msg.data && (msg.data.hasOwnProperty(activityTimeoutAttrId) || msg.data.hasOwnProperty(String(activityTimeoutAttrId)))) {
+                const value = msg.data[activityTimeoutAttrId] ?? msg.data[String(activityTimeoutAttrId)];
+                // Handle null value (0xffff) meaning "no timeout"
+                if (value === 0xffff || value === 65535) {
+                    result.activity_timeout = null;
+                } else {
+                    result.activity_timeout = value;
+                }
             }
             
             return Object.keys(result).length > 0 ? result : undefined;
@@ -143,6 +154,49 @@ export default {
                 await endpoint.read('hvacUserInterfaceCfg', [0xe000], { manufacturerCode: 0x105e });
             },
         },
+        {
+            key: ['activity_timeout'],
+            convertSet: async (entity, key, value, meta) => {
+                const endpoint = meta.device.getEndpoint(1);
+                if (!endpoint) {
+                    throw new Error('Endpoint 1 not found');
+                }
+                
+                let timeoutValue;
+                // Handle null/undefined for "no timeout" (0xffff)
+                if (value === null || value === undefined || value === 'disabled' || value === 'none') {
+                    timeoutValue = 0xffff;
+                } else {
+                    timeoutValue = Number(value);
+                    // Validate range: 5 seconds to 3600 seconds (1 hour)
+                    if (timeoutValue < 5 || timeoutValue > 3600) {
+                        throw new Error(`Activity timeout value must be between 5 and 3600 seconds, or null/disabled for no timeout, got ${timeoutValue}`);
+                    }
+                }
+                
+                const attrId = 0xe002;
+                const payload = {
+                    [attrId]: {
+                        value: timeoutValue,
+                        type: 0x21, // uint16
+                    },
+                };
+                
+                await endpoint.write('hvacUserInterfaceCfg', payload, {
+                    manufacturerCode: 0x105e,
+                });
+                
+                // Return null for state if 0xffff was set, otherwise return the actual value
+                return { state: { activity_timeout: timeoutValue === 0xffff ? null : timeoutValue } };
+            },
+            convertGet: async (entity, key, meta) => {
+                const endpoint = meta.device.getEndpoint(1);
+                if (!endpoint) {
+                    throw new Error('Endpoint 1 not found');
+                }
+                await endpoint.read('hvacUserInterfaceCfg', [0xe002], { manufacturerCode: 0x105e });
+            },
+        },
         tz.thermostat_occupied_heating_setpoint,
         tz.thermostat_system_mode,
         tz.thermostat_running_state,
@@ -175,6 +229,11 @@ export default {
             .withValueMin(0)
             .withValueMax(100)
             .withDescription('Brightness level when inactive (0-100). Must be less than or equal to brightness.'),
+        e.numeric('activity_timeout', ea.ALL)
+            .withUnit('s')
+            .withValueMin(5)
+            .withValueMax(3600)
+            .withDescription('Time in seconds since last user interaction before device is considered idle and inactive_brightness is used. Set to null/disabled for no timeout (UI always active).'),
         e.numeric('temperature_2', ea.STATE)
             .withUnit('°C')
             .withDescription('Ambient temperature from endpoint 2'),
