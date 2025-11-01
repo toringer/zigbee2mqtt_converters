@@ -18,20 +18,87 @@ export default {
         cluster: 'hvacUserInterfaceCfg',
         type: ['attributeReport', 'readResponse'],
         convert: (model, msg, publish, options, meta) => {
-            const attrId = 0xe001;
-            if (msg.data && (msg.data.hasOwnProperty(attrId) || msg.data.hasOwnProperty(String(attrId)))) {
-                const value = msg.data[attrId] ?? msg.data[String(attrId)];
-                return { inactive_brightness: value };
+            const result = {};
+            const inactiveBrightnessAttrId = 0xe001;
+            const brightnessAttrId = 0xe000;
+            
+            if (msg.data && (msg.data.hasOwnProperty(inactiveBrightnessAttrId) || msg.data.hasOwnProperty(String(inactiveBrightnessAttrId)))) {
+                const value = msg.data[inactiveBrightnessAttrId] ?? msg.data[String(inactiveBrightnessAttrId)];
+                result.inactive_brightness = value;
             }
+            
+            if (msg.data && (msg.data.hasOwnProperty(brightnessAttrId) || msg.data.hasOwnProperty(String(brightnessAttrId)))) {
+                const value = msg.data[brightnessAttrId] ?? msg.data[String(brightnessAttrId)];
+                result.brightness = value;
+            }
+            
+            return Object.keys(result).length > 0 ? result : undefined;
         },
     }],
     toZigbee: [
         {
             key: ['inactive_brightness'],
             convertSet: async (entity, key, value, meta) => {
+                const inactiveBrightness = Number(value);
+                if (inactiveBrightness < 0 || inactiveBrightness > 100) {
+                    throw new Error(`Inactive brightness value must be between 0 and 100, got ${inactiveBrightness}`);
+                }
+                
+                const endpoint = meta.device.getEndpoint(1);
+                if (!endpoint) {
+                    throw new Error('Endpoint 1 not found');
+                }
+                
+                // Read current brightness to validate constraint: inactive_brightness <= brightness
+                let currentBrightness = meta.state?.brightness;
+                if (currentBrightness === undefined) {
+                    try {
+                        const response = await endpoint.read('hvacUserInterfaceCfg', [0xe000], { manufacturerCode: 0x105e });
+                        currentBrightness = response?.[0xe000];
+                    } catch (err) {
+                        // If read fails, we'll let the device reject it with INVALID_VALUE
+                        currentBrightness = null;
+                    }
+                }
+                
+                if (currentBrightness !== null && inactiveBrightness > currentBrightness) {
+                    throw new Error(`Inactive brightness (${inactiveBrightness}) cannot exceed brightness (${currentBrightness}). Please set brightness first or reduce inactive_brightness.`);
+                }
+                
+                const attrId = 0xe001;
+                const payload = {
+                    [attrId]: {
+                        value: inactiveBrightness,
+                        type: 0x20, // uint8
+                    },
+                };
+                
+                try {
+                    await endpoint.write('hvacUserInterfaceCfg', payload, {
+                        manufacturerCode: 0x105e,
+                    });
+                    return { state: { inactive_brightness: inactiveBrightness } };
+                } catch (err) {
+                    if (err.message && err.message.includes('INVALID_VALUE')) {
+                        throw new Error(`Inactive brightness (${inactiveBrightness}) cannot exceed current brightness. Please increase brightness first or reduce inactive_brightness.`);
+                    }
+                    throw err;
+                }
+            },
+            convertGet: async (entity, key, meta) => {
+                const endpoint = meta.device.getEndpoint(1);
+                if (!endpoint) {
+                    throw new Error('Endpoint 1 not found');
+                }
+                await endpoint.read('hvacUserInterfaceCfg', [0xe001], { manufacturerCode: 0x105e });
+            },
+        },
+        {
+            key: ['brightness'],
+            convertSet: async (entity, key, value, meta) => {
                 const brightness = Number(value);
-                if (brightness >= 0 && brightness <= 100) {
-                    const attrId = 0xe001;
+                if (brightness >= 1 && brightness <= 100) {
+                    const attrId = 0xe000;
                     const endpoint = meta.device.getEndpoint(1);
                     if (!endpoint) {
                         throw new Error('Endpoint 1 not found');
@@ -45,9 +112,9 @@ export default {
                     await endpoint.write('hvacUserInterfaceCfg', payload, {
                         manufacturerCode: 0x105e,
                     });
-                    return { state: { inactive_brightness: brightness } };
+                    return { state: { brightness: brightness } };
                 } else {
-                    throw new Error(`Inactive brightness value must be between 0 and 100, got ${brightness}`);
+                    throw new Error(`Brightness value must be between 1 and 100, got ${brightness}`);
                 }
             },
             convertGet: async (entity, key, meta) => {
@@ -55,7 +122,7 @@ export default {
                 if (!endpoint) {
                     throw new Error('Endpoint 1 not found');
                 }
-                await endpoint.read('hvacUserInterfaceCfg', [0xe001], { manufacturerCode: 0x105e });
+                await endpoint.read('hvacUserInterfaceCfg', [0xe000], { manufacturerCode: 0x105e });
             },
         },
         tz.thermostat_occupied_heating_setpoint,
@@ -80,11 +147,16 @@ export default {
             .withSystemMode(["off", "heat"])
             .withRunningState(["idle", "heat"])
             .withPiHeatingDemand(),
+        e.numeric('brightness', ea.ALL)
+            .withUnit('%')
+            .withValueMin(1)
+            .withValueMax(100)
+            .withDescription('Display brightness when active (1-100)'),
         e.numeric('inactive_brightness', ea.ALL)
             .withUnit('%')
             .withValueMin(0)
             .withValueMax(100)
-            .withDescription('Brightness level when inactive (0-100)'),
+            .withDescription('Brightness level when inactive (0-100). Must be less than or equal to brightness.'),
     ],
     meta: {
         multiEndpoint: true,
