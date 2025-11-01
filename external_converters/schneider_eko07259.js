@@ -73,6 +73,13 @@ export default {
             .withValueMax(100)
             .withDescription('Brightness level when inactive (0-100)'),
     ],
-    meta: {"multiEndpoint":true},
+    meta: {
+        multiEndpoint: true,
+        defaultState: {
+            inactive_brightness: 50,
+            system_mode: 'heat',
+            occupied_heating_setpoint: 20,
+        },
+    },
 };
 
