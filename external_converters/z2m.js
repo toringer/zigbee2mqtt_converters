@@ -234,6 +234,6 @@ export default {
         await thermostatPIHeatingDemand(endpoint1);
         await thermostatOccupiedHeatingSetpoint(endpoint1);
         await bind(endpoint2, coordinatorEndpoint, ["seMetering"]);
-        await endpoint1.read("hvacUserInterfaceCfg", ["keypadLockout", "tempDisplayMode", 0xe000, 0xe001, 0xe002], { manufacturerCode: 0x105e });
+        await endpoint1.read("hvacUserInterfaceCfg", ["keypadLockout", "tempDisplayMode", "Brightnes", "InactiveBrightness", "ActivityTimeout"]);
     },
 };
